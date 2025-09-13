@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -35,7 +36,7 @@ func (apiCfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) 
 
 func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	apiCfg.fileserverHits.Store(0)
-	responseWithJSON(w, http.StatusOK, []byte("Hits have been reset to 0"))
+	respondWithJSON(w, http.StatusOK, []byte("Hits have been reset to 0"))
 }
 
 func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
@@ -47,29 +48,46 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		responseWithError(w, http.StatusBadRequest, "Something went wrong")
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
 	if len(params.Body) > 140 {
-		responseWithError(w, http.StatusBadRequest, "Something went wrong")
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
-	responseWithJSON(w, http.StatusOK, map[string]bool{"valid": true})
+	profanities := [3]string{"kerfuffle", "sharbert", "fornax"}
+	split_body := strings.Split(params.Body, " ")
+	cleaned_body_split := []string{}
+
+	for i := 0; i < len(split_body); i++ {
+		temp := split_body[i]
+		for j := 0; j < len(profanities); j++ {
+			if strings.ToLower(temp) == profanities[j] {
+				temp = "****"
+				break
+			}
+		}
+		cleaned_body_split = append(cleaned_body_split, temp)
+	}
+
+	cleaned_body := strings.Join(cleaned_body_split, " ")
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"cleaned_body": cleaned_body})
 }
 
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
-	responseWithJSON(w, http.StatusOK, []byte("OK"))
+	respondWithJSON(w, http.StatusOK, []byte("OK"))
 }
 
-func responseWithError(w http.ResponseWriter, code int, msg string) {
+func respondWithError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-func responseWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(payload)
