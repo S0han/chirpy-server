@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -39,18 +40,50 @@ func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hits have been reset to 0"))
 }
 
+func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Something went wrong"})
+		return
+	}
+
+	if len(params.Body) > 140 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Something went wrong"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
+}
+
 func main() {
 	mux := http.NewServeMux()
 
 	apiCfg := &apiConfig{}
 
-	// /healthz
+	// /healthz endpoint
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
+	// /metrics endpoint
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
+
+	// /validate_chirp endpoint
+	mux.Handle("POST /api/validate_chirp", http.HandlerFunc(handlerValidateChirp))
+	// /reset endpoint
 	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.handlerReset))
 
 	// fileserver at /app/
