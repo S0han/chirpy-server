@@ -35,9 +35,7 @@ func (apiCfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) 
 
 func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	apiCfg.fileserverHits.Store(0)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hits have been reset to 0"))
+	responseWithJSON(w, http.StatusOK, []byte("Hits have been reset to 0"))
 }
 
 func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
@@ -49,22 +47,32 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Something went wrong"})
+		responseWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
 	if len(params.Body) > 140 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Something went wrong"})
+		responseWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
+	responseWithJSON(w, http.StatusOK, map[string]bool{"valid": true})
+}
+
+func handlerHealthz(w http.ResponseWriter, r *http.Request) {
+	responseWithJSON(w, http.StatusOK, []byte("OK"))
+}
+
+func responseWithError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func responseWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(map[string]bool{"valid": true})
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
 }
 
 func main() {
@@ -73,11 +81,7 @@ func main() {
 	apiCfg := &apiConfig{}
 
 	// /healthz endpoint
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	mux.Handle("GET /api/healthz", http.HandlerFunc(handlerHealthz))
 	// /metrics endpoint
 	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
 
