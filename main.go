@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
 	_ "github.com/lib/pq"
@@ -24,10 +25,18 @@ type apiConfig struct {
 }
 
 type UserResponse struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID        	string    	`json:"id"`
+	CreatedAt 	time.Time 	`json:"created_at"`
+	UpdatedAt 	time.Time 	`json:"updated_at"`
+	Email     	string    	`json:"email"`
+}
+
+type ChirpResponse struct {
+	ID 			string 		`json:"id"`
+	CreatedAt 	time.Time 	`json:"created_at"`
+	UpdatedAt 	time.Time 	`json:"updated_at"`
+	Body 		string 		`json:"body"`
+	UserID     	string		`json:"user_id"` 		
 }
 
 func (apiCfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -92,26 +101,24 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 	respondWithJSON(w, http.StatusCreated, resp)
 }
 
-func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
+func (apiCfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body string `json:"body"`
+		Body 	string 	`json:"body"`
+		UserID 	string 	`json:"user_id"`
 	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+	var p parameters
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
-	if len(params.Body) > 140 {
+	if len(p.Body) > 140 {
 		respondWithError(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
 	profanities := [3]string{"kerfuffle", "sharbert", "fornax"}
-	split_body := strings.Split(params.Body, " ")
+	split_body := strings.Split(p.Body, " ")
 	cleaned_body_split := []string{}
 
 	for i := 0; i < len(split_body); i++ {
@@ -124,10 +131,26 @@ func handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
 		}
 		cleaned_body_split = append(cleaned_body_split, temp)
 	}
+	cleaned := strings.Join(cleaned_body_split, " ")
 
-	cleaned_body := strings.Join(cleaned_body_split, " ")
+	uid, err := uuid.Parse(p.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+	ch, err := apiCfg.queries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleaned,
+		UserID: uid,
+	})
 
-	respondWithJSON(w, http.StatusOK, map[string]string{"cleaned_body": cleaned_body})
+	resp := ChirpResponse{
+        ID:        ch.ID.String(),
+        CreatedAt: ch.CreatedAt,
+        UpdatedAt: ch.UpdatedAt,
+        Body:      ch.Body,
+        UserID:    ch.UserID.String(),
+    }
+    respondWithJSON(w, http.StatusCreated, resp)
 }
 
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
@@ -169,16 +192,16 @@ func main() {
 	}
 
 	// /healthz endpoint
-	mux.Handle("GET /api/healthz", http.HandlerFunc(handlerHealthz))
+	mux.HandleFunc("/api/healthz", handlerHealthz)
 	// /metrics endpoint
-	mux.Handle("GET /admin/metrics", http.HandlerFunc(apiCfg.handlerMetrics))
+	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 
-	// /validate_chirp endpoint
-	mux.Handle("POST /api/validate_chirp", http.HandlerFunc(handlerValidateChirp))
 	// /reset endpoint
-	mux.Handle("POST /admin/reset", http.HandlerFunc(apiCfg.handlerReset))
+	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 	// /create user
-	mux.Handle("POST /api/users", http.HandlerFunc(apiCfg.handlerCreateUser))
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+	// /create chirp
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 
 	// fileserver at /app/
 	fs := http.FileServer(http.Dir("."))
