@@ -61,18 +61,19 @@ func (apiCfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) 
 }
 
 func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
-	if apiCfg.platform != "dev" {
-		respondWithError(w, 403, "403 Forbidden")
-		return
-	}
+    if apiCfg.platform != "dev" {
+        respondWithError(w, 403, "403 Forbidden")
+        return
+    }
 
-	if err := apiCfg.queries.DeleteAllUsers(r.Context()); err != nil {
-		respondWithError(w, http.StatusInternalServerError, "database error")
-		return
-	}
+    if err := apiCfg.queries.DeleteAllUsers(r.Context()); err != nil {
+        fmt.Println(err)
+        respondWithError(w, http.StatusInternalServerError, "database error")
+        return
+    }
 
-	apiCfg.fileserverHits.Store(0)
-	respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+    apiCfg.fileserverHits.Store(0)
+    respondWithJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +88,7 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 
 	u, err := apiCfg.queries.CreateUser(r.Context(), p.Email)
 	if err != nil {
+		fmt.Println(err)
 		respondWithError(w, http.StatusInternalServerError, "database error")
 		return
 	}
