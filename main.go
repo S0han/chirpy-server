@@ -103,6 +103,31 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 	respondWithJSON(w, http.StatusCreated, resp)
 }
 
+// func (apiCfg *apiConfig) handlerGetChirp() {
+
+// }
+
+func (apiCfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := apiCfg.queries.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not receive chirps")
+		return
+	}
+
+	resp := []ChirpResponse{}
+	for _, ch := range chirps {
+		resp = append(resp, ChirpResponse{
+			ID:        ch.ID.String(),
+			CreatedAt: ch.CreatedAt,
+			UpdatedAt: ch.UpdatedAt,
+			Body:      ch.Body,
+			UserID:    ch.UserID.String(),
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
+}
+ 
 func (apiCfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body 	string 	`json:"body"`
@@ -197,6 +222,10 @@ func main() {
 	mux.HandleFunc("/api/healthz", handlerHealthz)
 	// /metrics endpoint
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
+	// /retrieve all chirps
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
+	// /retierve specific chirp
+	// mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.hanlerGetChirp)
 
 	// /reset endpoint
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
