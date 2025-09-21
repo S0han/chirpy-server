@@ -2,6 +2,7 @@ package main
 
 import (
 	"chirpy-server/internal/database"
+	"chirpy-server/internal/auth"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -79,6 +80,7 @@ func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	type createUserParams struct {
 		Email string `json:"email"`
+		Password string `json:"password"`
 	}
 	var p createUserParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -86,7 +88,16 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	u, err := apiCfg.queries.CreateUser(r.Context(), p.Email)
+	hp, err := auth.HashPassword(p.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not hash password")
+    	return
+	}
+
+	u, err := apiCfg.queries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          p.Email,
+		HashedPassword: hp,
+	})
 	if err != nil {
 		fmt.Println(err)
 		respondWithError(w, http.StatusInternalServerError, "database error")
@@ -99,13 +110,33 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 		UpdatedAt: u.UpdatedAt,
 		Email:     u.Email,
 	}
-
 	respondWithJSON(w, http.StatusCreated, resp)
 }
 
-// func (apiCfg *apiConfig) handlerGetChirp() {
+func (apiCfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpIDStr := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(chirpIDStr)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "id not found")
+		return 
+	}
+	
+	ch, err := apiCfg.queries.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "chirp not found")
+		return 
+	}
 
-// }
+	resp := ChirpResponse{
+        ID:        ch.ID.String(),
+        CreatedAt: ch.CreatedAt,
+        UpdatedAt: ch.UpdatedAt,
+        Body:      ch.Body,
+        UserID:    ch.UserID.String(),
+    }
+
+	respondWithJSON(w, http.StatusOK, resp)
+}
 
 func (apiCfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
 	chirps, err := apiCfg.queries.GetAllChirps(r.Context())
@@ -180,6 +211,37 @@ func (apiCfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Reque
     respondWithJSON(w, http.StatusCreated, resp)
 }
 
+func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	type loginParams struct {
+		Email 		string `json:"email"`
+		Password 	string `json:"password"`
+	}
+	var p loginParams
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	u, err := apiCfg.queries.GetUserByEmail(r.Context(), p.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+        return
+	}
+
+	if err := auth.CheckPasswordHash(p.Password, u.HashedPassword); err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+        return
+	}
+
+		resp := UserResponse{
+		ID:        u.ID.String(),
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+		Email:     u.Email,
+	}
+	respondWithJSON(w, http.StatusOK, resp)
+}
+
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, []byte("OK"))
 }
@@ -225,7 +287,7 @@ func main() {
 	// /retrieve all chirps
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
 	// /retierve specific chirp
-	// mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.hanlerGetChirp)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirp)
 
 	// /reset endpoint
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
@@ -233,6 +295,8 @@ func main() {
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 	// /create chirp
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
+	// /login
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
 
 	// fileserver at /app/
 	fs := http.FileServer(http.Dir("."))
