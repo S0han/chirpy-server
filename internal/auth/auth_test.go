@@ -2,8 +2,10 @@ package auth
 
 import (
 	"testing"
-	"time"
-	"github.com/google/uuid"
+    "net/http"
+    "time"
+	
+    "github.com/google/uuid"
 )
 
 func TestMakeAndValidateJWT_Success(t *testing.T) {
@@ -43,4 +45,39 @@ func TestValidateJWT_Expired(t *testing.T) {
     if _, err := ValidateJWT(tok, "secret"); err == nil {
         t.Fatalf("expected error for expired token")
     }
+}
+
+func TestGetBearerToken_Success(t *testing.T) {
+  h := http.Header{}
+  h.Set("Authorization", "Bearer abc.def.ghi")
+  tok, err := GetBearerToken(h)
+  if err != nil {
+    t.Fatalf("unexpected error: %v", err)
+  }
+  if tok != "abc.def.ghi" {
+    t.Fatalf("got %q, want %q", tok, "abc.def.ghi")
+  }
+}
+
+func TestGetBearerToken_MissingHeader(t *testing.T) {
+  h := http.Header{}
+  if _, err := GetBearerToken(h); err == nil {
+    t.Fatal("expected error, got nil")
+  }
+}
+
+func TestGetBearerToken_BadPrefix(t *testing.T) {
+  h := http.Header{}
+  h.Set("Authorization", "Token abc")
+  if _, err := GetBearerToken(h); err == nil {
+    t.Fatal("expected error, got nil")
+  }
+}
+
+func TestGetBearerToken_EmptyToken(t *testing.T) {
+  h := http.Header{}
+  h.Set("Authorization", "Bearer   ")
+  if _, err := GetBearerToken(h); err == nil {
+    t.Fatal("expected error, got nil")
+  }
 }

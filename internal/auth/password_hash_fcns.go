@@ -3,6 +3,8 @@ package auth
 import (
 	"time"
 	"fmt"
+	"net/http"
+	"strings"
 	
 	"golang.org/x/crypto/bcrypt"
 	
@@ -34,7 +36,6 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 	if err != nil {
 		return "", err
 	}
-
 	return tokenString, nil
 }
 
@@ -61,4 +62,23 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
         return uuid.Nil, err
     }
     return userID, nil
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("authorization header missing")
+	}
+
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		return "", fmt.Errorf("invalid authorization header")
+	}
+
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, prefix))
+	if token == "" {
+		return "", fmt.Errorf("empty bearer token")
+	}
+
+	return token, nil
 }

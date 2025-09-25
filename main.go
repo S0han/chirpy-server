@@ -21,8 +21,9 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	queries        *database.Queries
-	platform       string
+	queries        	*database.Queries
+	platform       	string
+	JWTSecret	   	string
 }
 
 type UserResponse struct {
@@ -191,11 +192,18 @@ func (apiCfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Reque
 	}
 	cleaned := strings.Join(cleaned_body_split, " ")
 
-	uid, err := uuid.Parse(p.UserID)
+	tokenStr, err := auth.GetBearerToken(r.Header)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "invalid user_id")
+		respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
 		return
 	}
+
+	uid, err := auth.ValidateJWT(tokenStr, apiCfg.JWTSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
 	ch, err := apiCfg.queries.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   cleaned,
 		UserID: uid,
@@ -213,8 +221,9 @@ func (apiCfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Reque
 
 func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type loginParams struct {
-		Email 		string `json:"email"`
-		Password 	string `json:"password"`
+		Email 				string 	`json:"email"`
+		Password 			string 	`json:"password"`
+		ExpiresInSeconds	*int	`json:"expires_in_seconds,omitempty"`
 	}
 	var p loginParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -233,13 +242,23 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
         return
 	}
 
-		resp := UserResponse{
+	resp := UserResponse{
 		ID:        u.ID.String(),
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
 		Email:     u.Email,
 	}
-	respondWithJSON(w, http.StatusOK, resp)
+
+	token, err := auth.MakeJWT(u.ID, apiCfg.JWTSecret, time.Hour*24)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not generate token")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"user":  resp,
+		"token": token,
+	})
 }
 
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
@@ -275,9 +294,15 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		log.Fatal("JWT_SECRET not set")
+	}
+
 	apiCfg := &apiConfig{
 		queries:  dbQueries,
 		platform: platform,
+		JWTSecret: secret,
 	}
 
 	// /healthz endpoint
