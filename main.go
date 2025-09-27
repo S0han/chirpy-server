@@ -80,8 +80,8 @@ func (apiCfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 
 func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	type createUserParams struct {
-		Email string `json:"email"`
-		Password string `json:"password"`
+		Email 		string 	`json:"email"`
+		Password 	string 	`json:"password"`
 	}
 	var p createUserParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -112,6 +112,54 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 		Email:     u.Email,
 	}
 	respondWithJSON(w, http.StatusCreated, resp)
+}
+
+func (apiCfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	type updateUserParams struct {
+		Email 		string 	`json:"email"`
+		Password 	string	`json:"password"` 
+	}
+	var p updateUserParams
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
+	}
+
+	tokenStr, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
+		return
+	}
+
+	uid, err := auth.ValidateJWT(tokenStr, apiCfg.JWTSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	hp, err := auth.HashPassword(p.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not hash password")
+    	return
+	}
+
+	u, err := apiCfg.queries.UpdateUser(r.Context(), database.UpdateUserParams{
+		ID:				uid,
+		Email:          p.Email,
+		HashedPassword: hp,
+	})
+	if err != nil {
+		fmt.Println(err)
+		respondWithError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	resp := UserResponse{
+		ID:        u.ID.String(),
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+		Email:     u.Email,
+	}
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 func (apiCfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
@@ -381,12 +429,16 @@ func main() {
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 	// /create chirp
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
-	// /login
+	// /login endpoint
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
-	// /refresh
+	// /refresh endpoint
 	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
-	// /revoke
+	// /revoke endpoint
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
+
+
+	// /update user
+	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
 
 	// fileserver at /app/
 	fs := http.FileServer(http.Dir("."))
