@@ -223,7 +223,6 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type loginParams struct {
 		Email 				string 	`json:"email"`
 		Password 			string 	`json:"password"`
-		ExpiresInSeconds	*int	`json:"expires_in_seconds,omitempty"`
 	}
 	var p loginParams
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -249,16 +248,78 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Email:     u.Email,
 	}
 
-	token, err := auth.MakeJWT(u.ID, apiCfg.JWTSecret, time.Hour*24)
+	token, err := auth.MakeJWT(u.ID, apiCfg.JWTSecret, time.Hour*1)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "could not generate token")
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"user":  resp,
-		"token": token,
+	refreshToken := auth.MakeRefreshToken()
+
+	_, err = apiCfg.queries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    u.ID,
+		ExpiresAt: time.Now().UTC().Add(time.Hour * 24 * 60), // 60 days
 	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not save refresh token")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"id":            resp.ID,
+		"created_at":    resp.CreatedAt,
+		"updated_at":    resp.UpdatedAt,
+		"email":         resp.Email,
+		"token":         token,
+		"refresh_token": refreshToken,
+	})
+}
+
+func (apiCfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
+	// Get the refresh token from the Authorization header
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
+		return
+	}
+
+	// Get user from refresh token (this also validates the token)
+	user, err := apiCfg.queries.GetUserFromRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+
+	// Create a new access token
+	accessToken, err := auth.MakeJWT(user.ID, apiCfg.JWTSecret, time.Hour)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not generate access token")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"token": accessToken,
+	})
+}
+
+func (apiCfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
+	// Get the refresh token from the Authorization header
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
+		return
+	}
+
+	// Revoke the refresh token
+	_, err = apiCfg.queries.RevokeRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not revoke token")
+		return
+	}
+
+	// Return 204 No Content
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
@@ -322,6 +383,10 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 	// /login
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+	// /refresh
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
+	// /revoke
+	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
 
 	// fileserver at /app/
 	fs := http.FileServer(http.Dir("."))

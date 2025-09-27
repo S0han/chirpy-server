@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	
+	"crypto/rand"
 	"golang.org/x/crypto/bcrypt"
 	
+	"encoding/hex"
+
     "github.com/golang-jwt/jwt/v5"
     "github.com/google/uuid"
 )
@@ -81,4 +83,10 @@ func GetBearerToken(headers http.Header) (string, error) {
 	}
 
 	return token, nil
+}
+
+func MakeRefreshToken() string {
+	token := make([]byte, 32)
+	rand.Read(token)
+	return hex.EncodeToString(token)
 }
