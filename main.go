@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
+	"errors"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
@@ -187,6 +187,48 @@ func (apiCfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request)
 	respondWithJSON(w, http.StatusOK, resp)
 }
 
+func (apiCfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+    chirpIDStr := r.PathValue("chirpID")
+    chirpID, err := uuid.Parse(chirpIDStr)
+    if err != nil {
+        respondWithError(w, http.StatusBadRequest, "invalid chirp id")
+        return
+    }
+
+    tokenStr, err := auth.GetBearerToken(r.Header)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
+        return
+    }
+
+    userID, err := auth.ValidateJWT(tokenStr, apiCfg.JWTSecret)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "invalid token")
+        return
+    }
+
+    chirp, err := apiCfg.queries.GetChirp(r.Context(), chirpID)
+    if errors.Is(err, sql.ErrNoRows) {
+        respondWithError(w, http.StatusNotFound, "chirp not found")
+        return
+    } else if err != nil {
+        respondWithError(w, http.StatusInternalServerError, "database error")
+        return
+    }
+
+    if chirp.UserID != userID {
+        respondWithError(w, http.StatusForbidden, "forbidden")
+        return
+    }
+
+    if err := apiCfg.queries.DeleteChirp(r.Context(), chirpID); err != nil {
+        respondWithError(w, http.StatusInternalServerError, "database error")
+        return
+    }
+
+    w.WriteHeader(http.StatusNoContent)
+}
+
 func (apiCfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
 	chirps, err := apiCfg.queries.GetAllChirps(r.Context())
 	if err != nil {
@@ -325,21 +367,18 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (apiCfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
-	// Get the refresh token from the Authorization header
 	refreshToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "missing or invalid token")
 		return
 	}
 
-	// Get user from refresh token (this also validates the token)
 	user, err := apiCfg.queries.GetUserFromRefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
 		return
 	}
 
-	// Create a new access token
 	accessToken, err := auth.MakeJWT(user.ID, apiCfg.JWTSecret, time.Hour)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "could not generate access token")
@@ -359,14 +398,12 @@ func (apiCfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Revoke the refresh token
 	_, err = apiCfg.queries.RevokeRefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "could not revoke token")
 		return
 	}
 
-	// Return 204 No Content
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -439,6 +476,9 @@ func main() {
 
 	// /update user
 	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
+
+	// /delete chirp
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirp)
 
 	// fileserver at /app/
 	fs := http.FileServer(http.Dir("."))
