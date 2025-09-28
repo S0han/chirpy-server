@@ -24,6 +24,7 @@ type apiConfig struct {
 	queries        	*database.Queries
 	platform       	string
 	JWTSecret	   	string
+	PolkaKey		string
 }
 
 type UserResponse struct {
@@ -413,7 +414,13 @@ func (apiCfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (apiCfg *apiConfig) handlerUpgradeUser(w http.ResponseWriter, r *http.Request) {
-    // Define the expected request structure
+    key, err := auth.GetAPIKey(r.Header)
+    if err != nil || key != apiCfg.PolkaKey {
+        respondWithError(w, http.StatusUnauthorized, "unauthorized")
+        return
+    }
+	
+	// Define the expected request structure
     type parameters struct {
         Event string `json:"event"`
         Data  struct {
@@ -424,7 +431,7 @@ func (apiCfg *apiConfig) handlerUpgradeUser(w http.ResponseWriter, r *http.Reque
     // Parse the JSON request
     decoder := json.NewDecoder(r.Body)
     params := parameters{}
-    err := decoder.Decode(&params)
+    err = decoder.Decode(&params)
     if err != nil {
         respondWithError(w, http.StatusBadRequest, "invalid JSON")
         return
@@ -478,6 +485,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	polkaKey := os.Getenv("POLKA_KEY")
 	platform := os.Getenv("PLATFORM")
 
 	dbQueries := database.New(db)
@@ -493,6 +501,7 @@ func main() {
 		queries:  dbQueries,
 		platform: platform,
 		JWTSecret: secret,
+		PolkaKey: polkaKey,
 	}
 
 	// /healthz endpoint
@@ -518,7 +527,6 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
 	// /polka endpoint
 	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerUpgradeUser)
-
 
 	// /update user
 	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
