@@ -31,6 +31,7 @@ type UserResponse struct {
 	CreatedAt 	time.Time 	`json:"created_at"`
 	UpdatedAt 	time.Time 	`json:"updated_at"`
 	Email     	string    	`json:"email"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
 }
 
 type ChirpResponse struct {
@@ -110,6 +111,7 @@ func (apiCfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Reques
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
 		Email:     u.Email,
+		IsChirpyRed: u.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusCreated, resp)
 }
@@ -158,6 +160,7 @@ func (apiCfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Reques
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
 		Email:     u.Email,
+		IsChirpyRed: u.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusOK, resp)
 }
@@ -336,6 +339,7 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
 		Email:     u.Email,
+		IsChirpyRed: u.IsChirpyRed,
 	}
 
 	token, err := auth.MakeJWT(u.ID, apiCfg.JWTSecret, time.Hour*1)
@@ -363,6 +367,7 @@ func (apiCfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		"email":         resp.Email,
 		"token":         token,
 		"refresh_token": refreshToken,
+		"is_chirpy_red": resp.IsChirpyRed,
 	})
 }
 
@@ -405,6 +410,45 @@ func (apiCfg *apiConfig) handlerRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (apiCfg *apiConfig) handlerUpgradeUser(w http.ResponseWriter, r *http.Request) {
+    // Define the expected request structure
+    type parameters struct {
+        Event string `json:"event"`
+        Data  struct {
+            UserID uuid.UUID `json:"user_id"`
+        } `json:"data"`
+    }
+
+    // Parse the JSON request
+    decoder := json.NewDecoder(r.Body)
+    params := parameters{}
+    err := decoder.Decode(&params)
+    if err != nil {
+        respondWithError(w, http.StatusBadRequest, "invalid JSON")
+        return
+    }
+
+    // If it's not a "user.upgraded" event, return 204 immediately
+    if params.Event != "user.upgraded" {
+        w.WriteHeader(http.StatusNoContent)
+        return
+    }
+
+    // Upgrade the user to Chirpy Red
+    _, err = apiCfg.queries.UpgradeUser(r.Context(), params.Data.UserID)
+    if err != nil {
+        if errors.Is(err, sql.ErrNoRows) {
+            respondWithError(w, http.StatusNotFound, "user not found")
+            return
+        }
+        respondWithError(w, http.StatusInternalServerError, "database error")
+        return
+    }
+
+    // Success - return 204 No Content
+    w.WriteHeader(http.StatusNoContent)
 }
 
 func handlerHealthz(w http.ResponseWriter, r *http.Request) {
@@ -472,6 +516,8 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefresh)
 	// /revoke endpoint
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevoke)
+	// /polka endpoint
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerUpgradeUser)
 
 
 	// /update user
