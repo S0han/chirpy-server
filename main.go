@@ -15,7 +15,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
-
+	"sort"
 	_ "github.com/lib/pq"
 )
 
@@ -257,6 +257,14 @@ func (apiCfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+
+	sortOrder := r.URL.Query().Get("sort")
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortOrder == "desc" {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		}
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
 
 	resp := make([]ChirpResponse, 0, len(chirps))
 	for _, ch := range chirps {
