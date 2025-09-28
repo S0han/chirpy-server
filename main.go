@@ -234,13 +234,31 @@ func (apiCfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Reque
 }
 
 func (apiCfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := apiCfg.queries.GetAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "could not receive chirps")
-		return
+	authorIDStr := r.URL.Query().Get("author_id")
+
+	var chirps []database.Chirp
+	var err error
+
+	if authorIDStr == "" {
+		chirps, err = apiCfg.queries.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "could not receive chirps")
+			return
+		}
+	} else {
+		uid, parseErr := uuid.Parse(authorIDStr)
+		if parseErr != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid author_id")
+			return
+		}
+		chirps, err = apiCfg.queries.GetChirpsByUserID(r.Context(), uid)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "could not receive chirps")
+			return
+		}
 	}
 
-	resp := []ChirpResponse{}
+	resp := make([]ChirpResponse, 0, len(chirps))
 	for _, ch := range chirps {
 		resp = append(resp, ChirpResponse{
 			ID:        ch.ID.String(),
